@@ -3,7 +3,7 @@
 A web app for uploading a grant proposal, extracting a structured summary, scoring it
 with an LLM against a rubric, and measuring how reliable those scores are.
 
-**Status:** Phase 1 of 6 (project setup, database, sign-in and roles).
+**Status:** Phase 2 of 6 (sign-in and roles, proposal upload with Markdown/text/PDF parsing).
 
 ## Stack
 
@@ -14,6 +14,7 @@ with an LLM against a rubric, and measuring how reliable those scores are.
 | Database | PostgreSQL (Neon) via Prisma 6 |
 | Auth | Auth.js v5, email + password, JWT sessions |
 | Validation | Zod |
+| PDF text extraction | unpdf |
 | Tests | Vitest |
 
 ## Run it locally
@@ -46,7 +47,7 @@ You need **Node.js 20 or newer** (`node -v` to check) and a free [Neon](https://
 
    ```bash
    npx prisma migrate dev --name init   # creates prisma/migrations/ and applies it
-   npx prisma db seed                    # creates the two demo users
+   npx prisma db seed                    # creates the demo users and 3 synthetic proposals
    ```
 
 5. **Start the app** and open http://localhost:3000.
@@ -73,6 +74,27 @@ Useful extras: `npx prisma studio` opens a browser view of your database tables.
 Both use `DEMO_PASSWORD`. The login page also has one-click demo buttons, which read
 the password on the server so it never reaches the browser.
 
+## Uploading proposals
+
+- Accepted: `.md` / `.txt` up to 200 KB, or `.pdf` up to 3 MB and 30 pages.
+- The type is checked by content, not just the file name: a PDF must start with the
+  `%PDF-` header, and text files must be valid UTF-8.
+- Extracted text must be 200–60,000 characters. The upper limit caps the cost of
+  every LLM call made on it later.
+- A PDF with no text layer (a scan) gets a specific error explaining why.
+- Each user can store up to 25 proposals.
+- Text is shown inside a `<pre>` element, so HTML or scripts in an upload are
+  displayed as text, never run.
+- A downloadable template is served from `public/proposal-template.md`.
+
+### Synthetic proposals
+
+`prisma/seed-data/` holds three fictional proposals for the same project idea, written
+to be clearly **weak**, **average** and **strong**. Keeping the topic fixed means score
+differences should reflect proposal quality rather than subject matter. They're seeded
+into the demo evaluator's account and later serve as a sanity check that the evaluator
+ranks them in the right order.
+
 ## How access control works
 
 - `src/middleware.ts` redirects signed-out visitors to `/login`. This is a **convenience
@@ -91,7 +113,8 @@ the password on the server so it never reaches the browser.
 ```
 prisma/
   schema.prisma        data model (all tables, defined up front)
-  seed.ts              creates the demo accounts
+  seed.ts              creates the demo accounts and synthetic proposals
+  seed-data/           weak / average / strong synthetic proposals
 src/
   auth.config.ts       edge-safe Auth.js config (used by middleware)
   auth.ts              full Auth.js config with the password check
@@ -100,9 +123,13 @@ src/
     db.ts              shared Prisma client
     auth/              permissions (pure), password hashing, session guards
     validation/        Zod schemas for form input
+    proposals/         upload parsing (pure, tested) and scoped database queries
   app/
     login/             sign-in page and server actions
     admin/users/       admin-only user management
+    proposals/         upload, detail and delete
+public/
+  proposal-template.md downloadable proposal template
 tests/                 Vitest unit tests
 analysis/              Python scripts for offline statistics (later phases)
 ```
