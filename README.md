@@ -3,7 +3,7 @@
 A web app for uploading a grant proposal, extracting a structured summary, scoring it
 with an LLM against a rubric, and measuring how reliable those scores are.
 
-**Status:** Phase 2 of 6 (sign-in and roles, proposal upload with Markdown/text/PDF parsing).
+**Status:** Phase 3 of 6 (sign-in and roles, proposal upload, statistics module).
 
 ## Stack
 
@@ -95,6 +95,42 @@ differences should reflect proposal quality rather than subject matter. They're 
 into the demo evaluator's account and later serve as a sanity check that the evaluator
 ranks them in the right order.
 
+## Statistics
+
+All statistics live in `src/lib/stats/`: pure TypeScript with no dependencies, tested in
+`tests/stats.test.ts` (edge cases) and `tests/stats-reference.test.ts` (accuracy).
+
+| Function | What it's for |
+| --- | --- |
+| `summarize(values)` | Mean, sample SD and 95% **t-interval** for repeated runs. Drops missing values and reports how many. |
+| `bootstrapCI(items, statistic)` | Percentile bootstrap with a seeded RNG, for statistics without a simple formula. |
+| `spearman(x, y)` | Rank agreement (do two raters order proposals the same way?). Handles ties. |
+| `icc2_1(rows)` | ICC(2,1): absolute agreement between raters, Shrout & Fleiss (1979). |
+| `spearmanWithCI`, `iccWithCI` | The above with bootstrap CIs over proposals. |
+
+Design choices:
+
+- **The t-interval is the headline CI for repeated runs.** With n = 5 runs, a percentile
+  bootstrap has too few distinct resamples and comes out too narrow (a test demonstrates this).
+- **Edge cases return `null`, never a made-up number.** N = 0 gives no mean; N = 1 gives a
+  mean but no SD or interval; identical scores give SD 0 and are flagged `allEqual`, so
+  the UI can say "all runs agreed" rather than implying certainty.
+- **Spearman vs ICC.** If an LLM scores every proposal exactly one point higher than a human,
+  Spearman is a perfect 1.0 but ICC is about 0.69. Spearman measures ordering; ICC measures
+  whether the numbers themselves match.
+
+### Cross-checked against SciPy and pingouin
+
+`analysis/generate_reference.py` computes t quantiles, means, SDs, t-intervals, Spearman
+and ICC with SciPy and pingouin, and writes `tests/fixtures/stats-reference.json`. The
+TypeScript tests require agreement to 9 decimal places. The JSON is committed, so
+`npm test` doesn't need Python. To regenerate it (only needed if you add cases):
+
+```bash
+source .venv/bin/activate
+python analysis/generate_reference.py
+```
+
 ## How access control works
 
 - `src/middleware.ts` redirects signed-out visitors to `/login`. This is a **convenience
@@ -124,14 +160,15 @@ src/
     auth/              permissions (pure), password hashing, session guards
     validation/        Zod schemas for form input
     proposals/         upload parsing (pure, tested) and scoped database queries
+    stats/             statistics: summaries, t-distribution, bootstrap, agreement
   app/
     login/             sign-in page and server actions
     admin/users/       admin-only user management
     proposals/         upload, detail and delete
 public/
   proposal-template.md downloadable proposal template
-tests/                 Vitest unit tests
-analysis/              Python scripts for offline statistics (later phases)
+tests/                 Vitest unit tests (fixtures/ holds the SciPy reference values)
+analysis/              Python script that generates the reference values
 ```
 
 ## Data and privacy
@@ -141,8 +178,8 @@ applicant data. A notice saying so appears on every page.
 
 ## Python analysis scripts
 
-The web app is Node.js only. The `analysis/` folder will hold Python scripts that
-cross-check the app's statistics. To set them up:
+The web app is Node.js only. The `analysis/` folder holds the Python script that
+cross-checks the app's statistics. To set it up:
 
 ```bash
 python3 -m venv .venv

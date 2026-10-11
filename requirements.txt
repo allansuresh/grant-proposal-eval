@@ -4,7 +4,7 @@
 #   python3 -m venv .venv
 #   source .venv/bin/activate        (Windows: .venv\Scripts\activate)
 #   pip install -r analysis/requirements.txt
-numpy==2.2.6
-scipy==1.15.3
-pandas==2.2.3
+numpy==2.3.4
+scipy==1.16.3
+pandas==2.3.3
 pingouin==0.5.5   # ICC and other inter-rater statistics, used to cross-check the TypeScript stats module
