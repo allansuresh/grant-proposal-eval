@@ -18,7 +18,7 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
-      ".venv/**",
+      ".venv/**", // Python virtual environment (contains third-party JS)
     ],
   },
   {

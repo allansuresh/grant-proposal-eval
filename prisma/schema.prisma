@@ -6,8 +6,13 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // The app connects through Neon's connection pooler (many short-lived serverless
+  // functions share a few database connections)...
+  url       = env("DATABASE_URL")
+  // ...but migrations need a direct connection: they take a session-level lock that
+  // a pooler can leave stuck (the "advisory lock" timeout).
+  directUrl = env("DIRECT_URL")
 }
 
 enum Role {

@@ -65,6 +65,36 @@ npm run check   # prisma generate → type-check → lint → unit tests
 
 Useful extras: `npx prisma studio` opens a browser view of your database tables.
 
+## Deploying (Vercel + Neon)
+
+1. **Production database.** In Neon, create a separate project (or branch) for production.
+   From **Connect**, copy both the **pooled** string (hostname contains `-pooler`) and the
+   **direct** one.
+2. **Import the GitHub repo into Vercel** (Add New → Project). Framework: Next.js.
+   Vercel runs `npm run vercel-build`, which applies migrations (`prisma migrate deploy`)
+   before building.
+3. **Environment variables** (Vercel → Settings → Environment Variables):
+
+   | Name | Value |
+   | --- | --- |
+   | `DATABASE_URL` | Neon **pooled** URL |
+   | `DIRECT_URL` | Neon **direct** URL |
+   | `AUTH_SECRET` | a new secret (`npx auth secret --raw`); never reuse the local one |
+   | `DEMO_PASSWORD` | a new password for the demo accounts |
+   | `ANTHROPIC_API_KEY` | your key |
+   | `PUBLIC_DEMO` | `true` |
+   | `GLOBAL_USD_PER_DAY` | e.g. `1` |
+
+4. **Seed production once**, from your machine, pointing at the production database:
+   ```bash
+   DATABASE_URL="<prod direct URL>" DIRECT_URL="<prod direct URL>" \
+   DEMO_PASSWORD="<same as on Vercel>" npx prisma db seed
+   ```
+5. Set a **monthly spend limit** in the Anthropic Console as a hard backstop.
+
+On the public demo (`PUBLIC_DEMO=true`) account creation is off, and the seeded test
+proposals can't be deleted (they never can), so one visitor can't break the demo for others.
+
 ## Demo accounts
 
 | Email | Role |

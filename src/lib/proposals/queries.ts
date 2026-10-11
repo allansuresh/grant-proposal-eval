@@ -37,11 +37,15 @@ export function getProposal(user: SessionUser, id: string) {
   });
 }
 
-/** Deletes in one query with the scope in the WHERE clause. Returns true if a row was deleted. */
+/**
+ * Deletes in one query with the scope in the WHERE clause. Returns true if a row was deleted.
+ * Synthetic proposals are test fixtures that the Reliability page depends on, so they
+ * can't be deleted from the app (on a public demo, any visitor could otherwise remove them).
+ */
 export async function deleteProposal(user: SessionUser, id: string): Promise<boolean> {
   // Related extraction, evaluations, runs and scores go too (onDelete: Cascade).
   const { count } = await db.proposal.deleteMany({
-    where: { id, ...proposalScope(user) },
+    where: { id, isSynthetic: false, ...proposalScope(user) },
   });
   return count === 1;
 }

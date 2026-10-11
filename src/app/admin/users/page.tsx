@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth/session";
 import { CreateUserForm } from "./create-user-form";
+import { isPublicDemo } from "@/lib/demo";
 
 export const metadata = { title: "Users · Proposal Evaluator" };
 
@@ -47,7 +48,13 @@ export default async function UsersPage() {
         </table>
       </div>
 
-      <CreateUserForm />
+      {isPublicDemo() ? (
+        <p className="card text-sm text-stone-600">
+          Creating accounts is turned off on the public demo. Run the app locally to try it.
+        </p>
+      ) : (
+        <CreateUserForm />
+      )}
     </div>
   );
 }

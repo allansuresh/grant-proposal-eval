@@ -179,9 +179,12 @@ export async function runNextScoring(user: SessionUser, evaluationId: string): P
     return progress("FAILED", completed, error);
   };
 
+  // Finished evaluations just report where they ended. PENDING is never created by this
+  // code (evaluations start as RUNNING), so it's treated like RUNNING below.
   if (ev.status === "COMPLETE" || ev.status === "FAILED") {
     return progress(ev.status, ev._count.runs, ev.error);
   }
+
   const runIndex = ev._count.runs;
   if (runIndex >= ev.runsRequested) {
     await db.evaluation.update({ where: { id: ev.id }, data: { status: "COMPLETE" } });

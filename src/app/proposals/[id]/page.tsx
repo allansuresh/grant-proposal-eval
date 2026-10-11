@@ -66,7 +66,11 @@ export default async function ProposalPage({ params, searchParams }: Props) {
             )}
           </p>
         </div>
-        <DeleteButton id={proposal.id} />
+        {proposal.isSynthetic ? (
+          <span className="text-xs text-stone-500">Test proposal · can&apos;t be deleted</span>
+        ) : (
+          <DeleteButton id={proposal.id} />
+        )}
       </div>
 
       <ExtractionPanel

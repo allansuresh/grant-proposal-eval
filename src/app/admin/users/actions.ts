@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth/session";
 import { hashPassword } from "@/lib/auth/password";
 import { createUserSchema } from "@/lib/validation/auth";
+import { isPublicDemo } from "@/lib/demo";
 
 export type CreateUserState = { error?: string; success?: string };
 
@@ -16,6 +17,9 @@ export async function createUserAction(
   // Checked again here, not just on the page: a server action is a public
   // POST endpoint, and hiding the form doesn't stop someone calling it.
   await requireAdmin();
+  if (isPublicDemo()) {
+    return { error: "Creating accounts is turned off on the public demo." };
+  }
 
   const parsed = createUserSchema.safeParse({
     email: formData.get("email"),
