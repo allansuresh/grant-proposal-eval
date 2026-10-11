@@ -16,12 +16,11 @@ export const authConfig = {
     // NOT the security boundary: every page and server action still checks
     // the session itself (see src/lib/auth/session.ts).
     authorized({ auth, request }) {
-      const signedIn = !!auth?.user;
-      const onLogin = request.nextUrl.pathname.startsWith("/login");
-      if (onLogin) {
-        return signedIn ? Response.redirect(new URL("/", request.nextUrl)) : true;
-      }
-      return signedIn;
+      // The login page is always reachable, even with a session cookie: the
+      // cookie may belong to a user who no longer exists (see getSessionUser),
+      // and redirecting them away from /login would trap them in a loop.
+      if (request.nextUrl.pathname.startsWith("/login")) return true;
+      return !!auth?.user;
     },
     // Copy id and role into the signed JWT when the user signs in...
     jwt({ token, user }) {

@@ -20,6 +20,16 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
   },
+  {
+    rules: {
+      // Allow intentionally unused names when prefixed with "_"
+      // (e.g. the `_prev` state argument that useActionState requires).
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_", destructuredArrayIgnorePattern: "^_" },
+      ],
+    },
+  },
 ];
 
 export default eslintConfig;

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { auth, signOut } from "@/auth";
+import { signOut } from "@/auth";
+import { getSessionUser } from "@/lib/auth/session";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -9,10 +10,9 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // Reading the session here is for display only (which links to show).
+  // Reading the user here is for display only (which links to show).
   // Pages still enforce access themselves.
-  const session = await auth();
-  const user = session?.user;
+  const user = await getSessionUser();
 
   return (
     <html lang="en">

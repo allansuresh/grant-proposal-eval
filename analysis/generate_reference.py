@@ -12,12 +12,17 @@ Re-run this only if you add cases:
 """
 
 import json
+import warnings
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pingouin as pg
 from scipy import stats
+
+# pingouin also computes confidence intervals we don't use; for the "perfect agreement"
+# cases they divide by zero and print harmless RuntimeWarnings. Silence those.
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="pingouin")
 
 OUT = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "stats-reference.json"
 

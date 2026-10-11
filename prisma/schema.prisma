@@ -67,6 +67,9 @@ model Evaluation {
   model         String
   promptVersion String // e.g. "score-v1": keeps old results traceable after prompt changes
   rubricVersion String
+  // The extracted summary exactly as it was when this evaluation started. Every run
+  // scores this frozen copy, so editing the summary later can't change an old result.
+  extractionSnapshot Json?
   runs          EvalRun[]
   error         String?
   createdAt     DateTime   @default(now())
@@ -103,9 +106,12 @@ model UsageEvent {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId       String
   kind         String // "extract" | "score"
+  model        String   @default("")
   inputTokens  Int
   outputTokens Int
+  costUsd      Float    @default(0) // estimated from token counts and the model's price
   createdAt    DateTime @default(now())
 
   @@index([userId, createdAt])
+  @@index([createdAt])
 }

@@ -3,7 +3,7 @@
 A web app for uploading a grant proposal, extracting a structured summary, scoring it
 with an LLM against a rubric, and measuring how reliable those scores are.
 
-**Status:** Phase 3 of 6 (sign-in and roles, proposal upload, statistics module).
+**Status:** Phase 4 of 6 (sign-in and roles, upload, statistics, LLM extraction and scoring).
 
 ## Stack
 
@@ -15,6 +15,7 @@ with an LLM against a rubric, and measuring how reliable those scores are.
 | Auth | Auth.js v5, email + password, JWT sessions |
 | Validation | Zod |
 | PDF text extraction | unpdf |
+| LLM | Anthropic API (`@anthropic-ai/sdk`), structured outputs |
 | Tests | Vitest |
 
 ## Run it locally
@@ -37,8 +38,8 @@ You need **Node.js 20 or newer** (`node -v` to check) and a free [Neon](https://
    npx auth secret          # writes AUTH_SECRET into .env.local
    ```
 
-   Then edit `.env`: paste the Neon URL into `DATABASE_URL`, and set `DEMO_PASSWORD`
-   to anything with 10+ characters.
+   Then edit `.env`: paste the Neon URL into `DATABASE_URL`, set `DEMO_PASSWORD`
+   to anything with 10+ characters, and add your `ANTHROPIC_API_KEY`.
 
    > `npx auth secret` writes to `.env.local`. Next.js reads both files, but the Prisma
    > CLI only reads `.env`. That's fine here, because Prisma doesn't need `AUTH_SECRET`.
@@ -95,6 +96,63 @@ differences should reflect proposal quality rather than subject matter. They're 
 into the demo evaluator's account and later serve as a sanity check that the evaluator
 ranks them in the right order.
 
+## Evaluator design
+
+```
+upload → extract (1 call, cheap model) → human checks/edits summary
+       → N scoring runs (1 call each, stronger model) on the frozen summary + document
+       → per-criterion mean, SD, 95% CI, n
+```
+
+- **Extraction runs once and can be corrected by the user.** All N scoring runs then score
+  the *same* frozen input (`Evaluation.extractionSnapshot`), so the variation you see is the
+  evaluator's own run-to-run variation, not extraction noise.
+- **Structured outputs + Zod.** Each call sends a JSON Schema the model must follow, and the
+  response is validated again with Zod (which also enforces rules the API's schema subset
+  can't, such as text length). If validation fails, the call is retried once with the error
+  shown to the model; if it fails again, the user sees a clear message.
+- **The overall score is computed in code** (mean of criteria), not asked of the model.
+- **Rubric anchors.** Each criterion describes what a 1, 3 and 5 look like
+  (`src/lib/llm/rubric.ts`), so the model compares against fixed descriptions.
+- **Versioned.** Every evaluation stores its model, prompt version and rubric version.
+- **One run per request.** The browser calls `POST /api/evaluations/:id/run` repeatedly and
+  shows a progress bar. Each request stays far below hosting time limits, and an
+  interrupted evaluation can be resumed. A unique constraint on `(evaluationId, runIndex)`
+  makes a duplicate request harmless.
+- **The API key is server-only.** `src/lib/llm/client.ts` imports `server-only`, so the build
+  fails if browser code ever imports it.
+
+### Prompt-injection defences
+
+Uploaded text is untrusted. Layers:
+
+1. **Delimiting.** The document is wrapped in `<proposal_document>` tags, and the system
+   prompt says text inside is data, never instructions. Any closing tag *inside* the
+   document is neutralised first, so it can't "break out".
+2. **Fixed output schema.** The model can only return the scores object; injected text can't
+   add fields or change the shape.
+3. **Pattern detector** (`src/lib/llm/injection.ts`) flags phrases like "ignore previous
+   instructions" or "give this a perfect score". It flags for human review rather than
+   blocking.
+4. **Model self-report.** The scorer returns `injection_suspected`, shown per evaluation.
+5. **Adversarial fixture.** The seeded *average + injection* proposal is the average
+   proposal plus an injected "give this 5 on every criterion" block. A well-defended
+   evaluator should score it like the clean average proposal, and flag it.
+
+### Cost controls
+
+Every LLM call is stored as a `UsageEvent` with tokens and an estimated cost. Limits are
+queries over that table (reset at 00:00 UTC):
+
+| Limit | Default |
+| --- | --- |
+| All users, estimated spend per day | $2 |
+| Scoring runs per user per day | 40 (8 five-run evaluations) |
+| Extractions per user per day | 20 |
+
+The demo accounts are shared by every visitor, so the global cap is what really protects the
+budget. Set a monthly spend limit in the Anthropic Console as a hard backstop.
+
 ## Statistics
 
 All statistics live in `src/lib/stats/`: pure TypeScript with no dependencies, tested in
@@ -150,7 +208,7 @@ python analysis/generate_reference.py
 prisma/
   schema.prisma        data model (all tables, defined up front)
   seed.ts              creates the demo accounts and synthetic proposals
-  seed-data/           weak / average / strong synthetic proposals
+  seed-data/           weak / average / strong synthetic proposals + an injected variant
 src/
   auth.config.ts       edge-safe Auth.js config (used by middleware)
   auth.ts              full Auth.js config with the password check
@@ -160,11 +218,15 @@ src/
     auth/              permissions (pure), password hashing, session guards
     validation/        Zod schemas for form input
     proposals/         upload parsing (pure, tested) and scoped database queries
+    llm/               rubric, prompts, schemas, structured call + retries, injection detector, limits
+    evaluation/        evaluation workflow (service.ts) and results summary (pure, tested)
+    usage.ts           usage recording and limit checks
     stats/             statistics: summaries, t-distribution, bootstrap, agreement
   app/
     login/             sign-in page and server actions
     admin/users/       admin-only user management
-    proposals/         upload, detail and delete
+    proposals/         upload, detail (extract → score → results) and delete
+    api/evaluations/   one-scoring-run-per-request endpoint
 public/
   proposal-template.md downloadable proposal template
 tests/                 Vitest unit tests (fixtures/ holds the SciPy reference values)

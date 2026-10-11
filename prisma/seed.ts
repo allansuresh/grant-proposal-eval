@@ -10,7 +10,14 @@ import { hashPassword } from "../src/lib/auth/password";
 
 const db = new PrismaClient();
 
-const SYNTHETIC = ["weak", "average", "strong"] as const;
+// file name → quality label shown in the app
+const SYNTHETIC = [
+  { file: "weak", label: "weak" },
+  { file: "average", label: "average" },
+  { file: "strong", label: "strong" },
+  // Adversarial case: the average proposal plus prompt-injection text.
+  { file: "average-injected", label: "average + injection" },
+] as const;
 
 async function main() {
   const password = process.env.DEMO_PASSWORD;
@@ -33,23 +40,23 @@ async function main() {
 
   // The synthetic proposals belong to the demo evaluator, so both demo
   // accounts see them. Fixed ids make the upsert idempotent.
-  for (const quality of SYNTHETIC) {
-    const text = readFileSync(path.join(__dirname, "seed-data", `${quality}.md`), "utf8").trim();
-    const title = text.match(/^#\s+(.+)$/m)?.[1] ?? quality;
+  for (const { file, label } of SYNTHETIC) {
+    const text = readFileSync(path.join(__dirname, "seed-data", `${file}.md`), "utf8").trim();
+    const title = text.match(/^#\s+(.+)$/m)?.[1] ?? file;
     const data = {
       title,
       sourceText: text,
       sourceType: "markdown",
       isSynthetic: true,
-      qualityLabel: quality,
+      qualityLabel: label,
       ownerId: evaluator.id,
     };
     await db.proposal.upsert({
-      where: { id: `synthetic-${quality}` },
+      where: { id: `synthetic-${file}` },
       update: data,
-      create: { id: `synthetic-${quality}`, ...data },
+      create: { id: `synthetic-${file}`, ...data },
     });
-    console.log(`Seeded synthetic proposal: ${quality}`);
+    console.log(`Seeded synthetic proposal: ${label}`);
   }
 }
 
