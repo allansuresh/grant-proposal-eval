@@ -3,7 +3,7 @@
 A web app for uploading a grant proposal, extracting a structured summary, scoring it
 with an LLM against a rubric, and measuring how reliable those scores are.
 
-**Status:** Phase 4 of 6 (sign-in and roles, upload, statistics, LLM extraction and scoring).
+**Status:** Phase 5 of 6 (sign-in and roles, upload, statistics, LLM extraction and scoring, reliability checks).
 
 ## Stack
 
@@ -83,6 +83,7 @@ the password on the server so it never reaches the browser.
 - Extracted text must be 200–60,000 characters. The upper limit caps the cost of
   every LLM call made on it later.
 - A PDF with no text layer (a scan) gets a specific error explaining why.
+- PDFs lose headings, so a title that wraps over several short lines is joined back together.
 - Each user can store up to 25 proposals.
 - Text is shown inside a `<pre>` element, so HTML or scripts in an upload are
   displayed as text, never run.
@@ -153,6 +154,53 @@ queries over that table (reset at 00:00 UTC):
 The demo accounts are shared by every visitor, so the global cap is what really protects the
 budget. Set a monthly spend limit in the Anthropic Console as a hard backstop.
 
+## Reliability checks
+
+Repeated runs only show that the evaluator is *repeatable*. The **Reliability** page
+(`/reliability`) runs three checks on seeded test proposals where the right behaviour is
+known in advance (logic in `src/lib/evaluation/reliability.ts`, unit-tested):
+
+| Check | Test proposals | Passes when |
+| --- | --- | --- |
+| Ranking | weak, average, strong | Overall means come out weak < average < strong; notes whether the gaps exceed run-to-run variation |
+| Prompt injection | average vs. average + injected "give this 5" block | Score rises by no more than 0.5, and the injection is flagged |
+| Perturbation | strong vs. strong with **$84,000 → $84,000,000** (contradicting its own budget table) | Budget realism drops by ≥ 1 and no other criterion moves by more than 0.75 (no halo effect) |
+
+Each check needs at least 3 runs per proposal and warns if the two sides were scored with
+different prompt versions. A **compare** tool shows any two proposals side by side, for your
+own perturbation tests.
+
+Each proposal page also keeps an **evaluation history**, so results from an older prompt or
+model stay viewable next to newer ones.
+
+## Findings from testing
+
+Things that manual testing revealed, and what changed as a result:
+
+1. **The test data leaked its answers.** The synthetic proposals began with an author's note
+   ("Intended quality level: strong"), and the variants announced themselves in their
+   headings ("…with injected instructions"). The evaluator could read all of it, so early
+   ranking and injection results were contaminated. Fix: the seed strips the note
+   (`stripAuthorNote`), variants keep the original heading, and a test
+   (`tests/seed-data.test.ts`) fails if any stored text contains a giveaway or if a variant
+   differs from its original anywhere except the intended change. Changing a proposal's text
+   now also deletes its old evaluations, so stale results can't be mixed with new ones.
+2. **Editing the summary didn't change scores, and the UI implied it would.** The scorer
+   gets both the editable summary and the original document, and is told the document wins.
+   That's deliberate (an evaluator shouldn't be able to "fix" a summary into a better score),
+   but the UI said "correct anything before scoring". Fix: the UI now says the submitted
+   document takes precedence; edited fields are marked and listed on each evaluation, and
+   the AI's original extraction is stored (`Extraction.aiFields`) for auditing.
+3. **One planted inconsistency moved only the criterion it should.** Changing a single
+   number ($84k → $84M) dropped Budget realism from about 5 to 2, while the other four
+   criteria were unchanged, so no halo effect. (Observed before fix 1, with 2 runs; the
+   perturbation check above repeats it properly.)
+4. **Run-to-run variation is small.** Most criteria scored identically across 5 runs; the
+   variation appears on borderline criteria (e.g. a budget between two anchors). Being
+   consistent is not the same as being right, which is why the checks above exist.
+5. **Two runs give meaningless intervals.** With n = 2 the 95% t-interval uses t* = 12.7 and
+   spans far beyond 1–5. The minimum is now 3 runs, and intervals aren't shown below that.
+
 ## Statistics
 
 All statistics live in `src/lib/stats/`: pure TypeScript with no dependencies, tested in
@@ -208,7 +256,7 @@ python analysis/generate_reference.py
 prisma/
   schema.prisma        data model (all tables, defined up front)
   seed.ts              creates the demo accounts and synthetic proposals
-  seed-data/           weak / average / strong synthetic proposals + an injected variant
+  seed-data/           weak / average / strong synthetic proposals + injected and perturbed variants
 src/
   auth.config.ts       edge-safe Auth.js config (used by middleware)
   auth.ts              full Auth.js config with the password check
@@ -219,13 +267,14 @@ src/
     validation/        Zod schemas for form input
     proposals/         upload parsing (pure, tested) and scoped database queries
     llm/               rubric, prompts, schemas, structured call + retries, injection detector, limits
-    evaluation/        evaluation workflow (service.ts) and results summary (pure, tested)
+    evaluation/        workflow (service.ts); results summary, reliability checks, edit tracking (pure, tested)
     usage.ts           usage recording and limit checks
     stats/             statistics: summaries, t-distribution, bootstrap, agreement
   app/
     login/             sign-in page and server actions
     admin/users/       admin-only user management
     proposals/         upload, detail (extract → score → results) and delete
+    reliability/       ranking, injection and perturbation checks + compare tool
     api/evaluations/   one-scoring-run-per-request endpoint
 public/
   proposal-template.md downloadable proposal template

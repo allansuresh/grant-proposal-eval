@@ -24,7 +24,9 @@ export function estimateCostUsd(model: string, inputTokens: number, outputTokens
 
 export const RUNS = {
   default: 5,
-  min: 2, // at least 2, or there's no spread to measure
+  // With 2 runs a 95% t-interval uses t* = 12.7 and is too wide to mean anything,
+  // so 3 is the smallest number of runs that gives a usable interval.
+  min: 3,
   max: 5,
 } as const;
 

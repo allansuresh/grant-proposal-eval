@@ -53,14 +53,35 @@ export function normaliseText(raw: string): string {
     .trim();
 }
 
-/** Title: first Markdown heading, else a short first line, else the file name. */
+/**
+ * A title from the opening lines of plain text.
+ *
+ * PDFs lose headings, and a long title set in a large font wraps over several
+ * short lines ("Solar Cold Rooms for Smallholder" / "Vegetable Farmers in the
+ * Tarin" / "Valley"). So we join consecutive short lines, stopping at a long
+ * (body-text) line, at sentence punctuation, or once the title would exceed 120
+ * characters.
+ */
+export function titleFromOpeningLines(text: string): string | null {
+  const lines = text.split("\n").map((l) => l.trim());
+  const first = lines.findIndex((l) => l !== "");
+  if (first === -1 || lines[first].length > 120) return null;
+
+  let title = lines[first];
+  for (let i = first + 1; i < lines.length && i <= first + 3; i++) {
+    const next = lines[i];
+    if (next === "" || /[.:;!?]$/.test(title) || next.length > 60) break;
+    if (title.length + 1 + next.length > 120) break;
+    title = `${title} ${next}`;
+  }
+  return title;
+}
+
+/** Title: first Markdown heading, else the opening lines, else the file name. */
 export function deriveTitle(text: string, fileName: string): string {
-  const heading = text.match(/^#\s+(.+)$/m)?.[1];
-  const firstLine = text.split("\n").find((l) => l.trim() !== "")?.trim();
+  const heading = text.match(/^#\s+(.+)$/m)?.[1]?.trim();
   const fromFile = fileName.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ");
-  const candidate =
-    heading?.trim() || (firstLine && firstLine.length <= 120 ? firstLine : fromFile);
-  return candidate.slice(0, LIMITS.maxTitleChars);
+  return (heading || titleFromOpeningLines(text) || fromFile).slice(0, LIMITS.maxTitleChars);
 }
 
 function checkLength(text: string): string | null {

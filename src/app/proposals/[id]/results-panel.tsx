@@ -1,6 +1,7 @@
 import type { EvaluationResults } from "@/lib/evaluation/summary";
 import type { InjectionMatch } from "@/lib/llm/injection";
 import type { Summary } from "@/lib/stats";
+import { MIN_RUNS_FOR_CHECKS } from "@/lib/evaluation/reliability";
 
 interface Props {
   results: EvaluationResults;
@@ -11,13 +12,19 @@ interface Props {
   rubricVersion: string;
   createdAt: Date;
   injectionMatches: InjectionMatch[];
+  /** Labels of summary fields the reviewer had edited when this evaluation ran. */
+  editedFieldLabels: string[];
 }
 
 const fmt = (x: number | null | undefined, digits = 2) =>
   x === null || x === undefined ? "–" : x.toFixed(digits);
 
+// The stats module computes an interval for any n ≥ 2, which is mathematically
+// correct. Whether to *show* it is a presentation decision: with 2 runs the 95%
+// interval uses t* = 12.7 and spans far beyond the 1–5 scale, which helps nobody.
 function ciText(s: Summary): string {
   if (s.allEqual) return "all runs agreed";
+  if (s.n < MIN_RUNS_FOR_CHECKS) return `needs ≥ ${MIN_RUNS_FOR_CHECKS} runs`;
   if (!s.ci) return "–";
   return `${fmt(s.ci.low)} to ${fmt(s.ci.high)}`;
 }
@@ -41,6 +48,14 @@ export function ResultsPanel(props: Props) {
         model on one proposal. The interval shows how much the scores varied between runs; it
         says nothing about whether the scores are <em>right</em>.
       </p>
+
+      {props.editedFieldLabels.length > 0 && (
+        <p className="rounded-md bg-stone-100 p-3 text-sm text-stone-700">
+          Scored with your corrections to: {props.editedFieldLabels.join(", ")}. The scorer saw
+          them as reviewer notes; where they conflict with the submitted document, the document
+          takes precedence.
+        </p>
+      )}
 
       {props.status === "FAILED" && (
         <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-800">

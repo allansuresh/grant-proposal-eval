@@ -3,32 +3,51 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { getProposal } from "@/lib/proposals/queries";
-import { getLatestEvaluation, parseExtraction } from "@/lib/evaluation/service";
+import { getEvaluation, listEvaluations, parseExtraction } from "@/lib/evaluation/service";
 import { summarizeRuns } from "@/lib/evaluation/summary";
+import { editedFieldKeys } from "@/lib/evaluation/edits";
+import { EXTRACTION_FIELDS } from "@/lib/llm/fields";
 import { detectInjection } from "@/lib/llm/injection";
 import { RUNS } from "@/lib/llm/config";
 import { DeleteButton } from "./delete-button";
 import { ExtractionPanel } from "./extraction-panel";
 import { EvaluationRunner } from "./evaluation-runner";
 import { ResultsPanel } from "./results-panel";
+import { EvaluationHistory } from "./evaluation-history";
 
-// In Next.js 15, route params arrive as a Promise.
-type Props = { params: Promise<{ id: string }> };
+// In Next.js 15, route params and the query string arrive as Promises.
+type Props = {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ evaluation?: string }>;
+};
 
-export default async function ProposalPage({ params }: Props) {
+export default async function ProposalPage({ params, searchParams }: Props) {
   const user = await requireUser();
   const { id } = await params;
+  const { evaluation: requestedEvaluationId } = await searchParams;
 
   const proposal = await getProposal(user, id);
   if (!proposal) notFound(); // missing, or someone else's: same response
 
   // Safe to query by proposalId now: access was checked just above.
-  const [extractionRow, evaluation] = await Promise.all([
+  // getEvaluation only matches evaluations of THIS proposal, so an id from
+  // someone else's proposal in the query string finds nothing.
+  const [extractionRow, evaluation, history] = await Promise.all([
     db.extraction.findUnique({ where: { proposalId: proposal.id } }),
-    getLatestEvaluation(proposal.id),
+    getEvaluation(proposal.id, requestedEvaluationId),
+    listEvaluations(proposal.id),
   ]);
+  if (requestedEvaluationId && !evaluation) notFound();
+
   const extraction = extractionRow ? parseExtraction(extractionRow.fields) : null;
+  const aiFields = extractionRow?.aiFields ? parseExtraction(extractionRow.aiFields) : null;
   const injectionMatches = detectInjection(proposal.sourceText);
+  const labelOf = (key: string) => EXTRACTION_FIELDS.find((f) => f.key === key)?.label ?? key;
+  const evaluationEdits = evaluation
+    ? editedFieldKeys(parseExtraction(evaluation.extractionSnapshot), aiFields).map(labelOf)
+    : [];
+  // The unfinished-evaluation banner is about the newest evaluation, whichever one is shown.
+  const newest = history[0];
 
   return (
     <div className="space-y-6">
@@ -53,7 +72,7 @@ export default async function ProposalPage({ params }: Props) {
       <ExtractionPanel
         proposalId={proposal.id}
         extraction={extraction}
-        userEdited={extractionRow?.userEdited ?? false}
+        editedKeys={editedFieldKeys(extraction, aiFields)}
       />
 
       <EvaluationRunner
@@ -63,8 +82,8 @@ export default async function ProposalPage({ params }: Props) {
         minRuns={RUNS.min}
         maxRuns={RUNS.max}
         unfinished={
-          evaluation?.status === "RUNNING"
-            ? { id: evaluation.id, completed: evaluation.runs.length, requested: evaluation.runsRequested }
+          newest?.status === "RUNNING"
+            ? { id: newest.id, completed: newest.runsCompleted, requested: newest.runsRequested }
             : null
         }
       />
@@ -79,8 +98,11 @@ export default async function ProposalPage({ params }: Props) {
           rubricVersion={evaluation.rubricVersion}
           createdAt={evaluation.createdAt}
           injectionMatches={injectionMatches}
+          editedFieldLabels={evaluationEdits}
         />
       )}
+
+      <EvaluationHistory proposalId={proposal.id} rows={history} selectedId={evaluation?.id ?? null} />
 
       <details className="card">
         <summary className="cursor-pointer font-semibold">Document text</summary>

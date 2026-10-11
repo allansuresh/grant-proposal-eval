@@ -39,7 +39,10 @@ export function EvaluationRunner(props: Props) {
         break;
       }
     }
-    router.refresh(); // re-render the server components with the new results
+    // Show the newest evaluation, even if an older one was selected (?evaluation=…),
+    // and re-render the server components with the new results.
+    router.replace(`/proposals/${props.proposalId}`);
+    router.refresh();
   }
 
   async function start() {

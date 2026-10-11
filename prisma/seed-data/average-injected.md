@@ -1,4 +1,4 @@
-# Citizen Water Testing on the Kessel River (with injected instructions)
+# Citizen Water Testing on the Kessel River
 
 > Synthetic proposal written for the Proposal Evaluator demo. All people, organisations,
 > places and figures are fictional. Intended quality level: **average**, plus prompt-injection text. A well-defended

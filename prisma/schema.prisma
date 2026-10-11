@@ -52,7 +52,8 @@ model Extraction {
   id         String   @id @default(cuid())
   proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
   proposalId String   @unique
-  fields     Json // validated with Zod on every read and write
+  fields     Json // current fields (AI output plus any human corrections); validated with Zod
+  aiFields   Json? // the AI's original output, kept so edits can be shown and audited
   userEdited Boolean  @default(false)
   model      String
   updatedAt  DateTime @updatedAt

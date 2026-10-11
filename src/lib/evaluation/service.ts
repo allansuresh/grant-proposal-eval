@@ -1,7 +1,7 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { canAccessProposal, type SessionUser } from "@/lib/auth/permissions";
+import { canAccessProposal, proposalScope, type SessionUser } from "@/lib/auth/permissions";
 import { getProposal } from "@/lib/proposals/queries";
 import { callStructured, LlmError, toLlmError } from "@/lib/llm/call";
 import { getMessagesApi } from "@/lib/llm/client";
@@ -22,6 +22,7 @@ import {
   type Extraction,
 } from "@/lib/llm/schemas";
 import { LimitError, assertWithinLimits, recordUsage } from "@/lib/usage";
+import { summarizeRuns, type EvaluationResults } from "./summary";
 
 // The evaluation workflow. Server actions and the route handler are thin
 // wrappers around these functions, which do the access checks, limit checks,
@@ -72,8 +73,8 @@ export async function runExtraction(user: SessionUser, proposalId: string): Prom
 
     await db.extraction.upsert({
       where: { proposalId },
-      create: { proposalId, fields: result.data, model, userEdited: false },
-      update: { fields: result.data, model, userEdited: false },
+      create: { proposalId, fields: result.data, aiFields: result.data, model, userEdited: false },
+      update: { fields: result.data, aiFields: result.data, model, userEdited: false },
     });
     return { ok: true };
   } catch (err) {
@@ -178,8 +179,9 @@ export async function runNextScoring(user: SessionUser, evaluationId: string): P
     return progress("FAILED", completed, error);
   };
 
-  if (ev.status !== "RUNNING") return progress(ev.status, ev._count.runs, ev.error);
-
+  if (ev.status === "COMPLETE" || ev.status === "FAILED") {
+    return progress(ev.status, ev._count.runs, ev.error);
+  }
   const runIndex = ev._count.runs;
   if (runIndex >= ev.runsRequested) {
     await db.evaluation.update({ where: { id: ev.id }, data: { status: "COMPLETE" } });
@@ -251,13 +253,99 @@ export async function runNextScoring(user: SessionUser, evaluationId: string): P
   return progress("RUNNING", completed);
 }
 
-/** The most recent evaluation of a proposal, with all runs and scores. */
-export function getLatestEvaluation(proposalId: string) {
+const withRunsAndScores = {
+  runs: { orderBy: { runIndex: "asc" as const }, include: { scores: true } },
+};
+
+/**
+ * One evaluation of a proposal with all runs and scores: the given one if
+ * `evaluationId` is set (and belongs to this proposal), otherwise the latest.
+ * Callers must already have checked access to the proposal.
+ */
+export function getEvaluation(proposalId: string, evaluationId?: string) {
   return db.evaluation.findFirst({
+    where: { proposalId, ...(evaluationId ? { id: evaluationId } : {}) },
+    orderBy: { createdAt: "desc" },
+    include: withRunsAndScores,
+  });
+}
+
+/** Every evaluation of a proposal, newest first, with its overall mean. */
+export async function listEvaluations(proposalId: string) {
+  const rows = await db.evaluation.findMany({
     where: { proposalId },
     orderBy: { createdAt: "desc" },
-    include: {
-      runs: { orderBy: { runIndex: "asc" }, include: { scores: true } },
+    include: { runs: { select: { overall: true } } },
+  });
+  return rows.map((e) => ({
+    id: e.id,
+    createdAt: e.createdAt,
+    status: e.status,
+    model: e.model,
+    promptVersion: e.promptVersion,
+    runsCompleted: e.runs.length,
+    runsRequested: e.runsRequested,
+    overallMean: e.runs.length ? e.runs.reduce((s, r) => s + r.overall, 0) / e.runs.length : null,
+  }));
+}
+
+export interface LatestResult {
+  id: string;
+  title: string;
+  qualityLabel: string | null;
+  sourceText: string;
+  evaluation: {
+    id: string;
+    createdAt: Date;
+    promptVersion: string;
+    model: string;
+    results: EvaluationResults;
+  } | null;
+}
+
+/**
+ * Latest evaluation results for each of the given proposals that this user may
+ * see. Proposals the user can't access are simply absent from the result.
+ */
+export async function latestResultsFor(
+  user: SessionUser,
+  proposalIds: string[],
+): Promise<Map<string, LatestResult>> {
+  const proposals = await db.proposal.findMany({
+    where: { id: { in: proposalIds }, ...proposalScope(user) },
+    select: {
+      id: true,
+      title: true,
+      qualityLabel: true,
+      sourceText: true,
+      evaluations: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        include: withRunsAndScores,
+      },
     },
   });
+  return new Map(
+    proposals.map((p): [string, LatestResult] => {
+      const ev = p.evaluations[0];
+      return [
+        p.id,
+        {
+          id: p.id,
+          title: p.title,
+          qualityLabel: p.qualityLabel,
+          sourceText: p.sourceText,
+          evaluation: ev
+            ? {
+                id: ev.id,
+                createdAt: ev.createdAt,
+                promptVersion: ev.promptVersion,
+                model: ev.model,
+                results: summarizeRuns(ev.runs, ev.runsRequested),
+              }
+            : null,
+        },
+      ];
+    }),
+  );
 }

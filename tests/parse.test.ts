@@ -49,10 +49,25 @@ describe("helpers", () => {
     expect(normaliseText("a\r\nb\u0000c\n\n\n\nd  ")).toBe("a\nbc\n\nd");
   });
 
-  it("derives a title from a heading, a short first line, or the file name", () => {
+  it("derives a title from a heading, the opening lines, or the file name", () => {
     expect(deriveTitle("intro\n# Real Title\nbody", "x.md")).toBe("Real Title");
-    expect(deriveTitle("Short first line\nbody", "x.txt")).toBe("Short first line");
+    expect(deriveTitle("Short first line.\nbody", "x.txt")).toBe("Short first line.");
     expect(deriveTitle("x".repeat(200), "my_great-proposal.txt")).toBe("my great proposal");
+  });
+
+  it("joins a title that a PDF wrapped over several short lines", () => {
+    // The exact opening of the sample PDF, as extracted.
+    const text =
+      "Solar Cold Rooms for Smallholder\nVegetable Farmers in the Tarin\nValley\n" +
+      "Synthetic proposal for testing the Proposal Evaluator. All people,\norganisations...";
+    expect(deriveTitle(text, "x.pdf")).toBe(
+      "Solar Cold Rooms for Smallholder Vegetable Farmers in the Tarin Valley",
+    );
+  });
+
+  it("doesn't swallow body text into the title", () => {
+    const text = "Project Title\nThis paragraph is ordinary body text that runs well past sixty characters.";
+    expect(deriveTitle(text, "x.pdf")).toBe("Project Title");
   });
 });
 
