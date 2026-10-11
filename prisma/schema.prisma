@@ -1,0 +1,111 @@
+// Data model for the Grant Proposal Evaluator Reliability Tool.
+// The full schema is defined up front so later phases add code, not migrations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  EVALUATOR
+}
+
+enum EvalStatus {
+  PENDING
+  RUNNING
+  COMPLETE
+  FAILED
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  role         Role         @default(EVALUATOR)
+  proposals    Proposal[]
+  usage        UsageEvent[]
+  createdAt    DateTime     @default(now())
+}
+
+model Proposal {
+  id           String       @id @default(cuid())
+  owner        User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId      String
+  title        String
+  sourceText   String // untrusted user content: never rendered as HTML, always delimited in prompts
+  sourceType   String       @default("markdown") // "markdown" | "text" | "pdf"
+  isSynthetic  Boolean      @default(false)
+  qualityLabel String? // "weak" | "average" | "strong" for seeded synthetic proposals
+  extraction   Extraction?
+  evaluations  Evaluation[]
+  createdAt    DateTime     @default(now())
+
+  @@index([ownerId])
+}
+
+model Extraction {
+  id         String   @id @default(cuid())
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  proposalId String   @unique
+  fields     Json // validated with Zod on every read and write
+  userEdited Boolean  @default(false)
+  model      String
+  updatedAt  DateTime @updatedAt
+}
+
+model Evaluation {
+  id            String     @id @default(cuid())
+  proposal      Proposal   @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  proposalId    String
+  status        EvalStatus @default(PENDING)
+  runsRequested Int
+  model         String
+  promptVersion String // e.g. "score-v1": keeps old results traceable after prompt changes
+  rubricVersion String
+  runs          EvalRun[]
+  error         String?
+  createdAt     DateTime   @default(now())
+
+  @@index([proposalId])
+}
+
+model EvalRun {
+  id            String           @id @default(cuid())
+  evaluation    Evaluation       @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  evaluationId  String
+  runIndex      Int
+  overall       Float
+  injectionFlag Boolean          @default(false)
+  scores        CriterionScore[]
+  createdAt     DateTime         @default(now())
+
+  @@unique([evaluationId, runIndex]) // a retried request can't store the same run twice
+}
+
+model CriterionScore {
+  id            String  @id @default(cuid())
+  run           EvalRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runId         String
+  criterion     String // rubric key, e.g. "feasibility"
+  score         Int
+  justification String
+
+  @@index([runId])
+}
+
+model UsageEvent {
+  id           String   @id @default(cuid())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  kind         String // "extract" | "score"
+  inputTokens  Int
+  outputTokens Int
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
