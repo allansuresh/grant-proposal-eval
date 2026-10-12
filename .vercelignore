@@ -1,0 +1,3 @@
+# Offline Python analysis scripts: run locally, never deployed.
+analysis/
+.venv/
